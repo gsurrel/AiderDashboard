@@ -1,6 +1,6 @@
 # AiderDashboard
 
-This is a dashboard to [visualize]([url](https://gsurrel.github.io/AiderDashboard/)) the [Aider LLM leaderboard](https://aider.chat/docs/leaderboards/), using the data [straight from the repository](https://github.com/Aider-AI/aider/blob/main/aider/website/_data/polyglot_leaderboard.yml).
+This is a dashboard to [visualize](https://gsurrel.github.io/AiderDashboard/) the [Aider LLM leaderboard](https://aider.chat/docs/leaderboards/), using the data [straight from the repository](https://github.com/Aider-AI/aider/blob/main/aider/website/_data/polyglot_leaderboard.yml).
 
 The visualization is done purely on the client's side, with a single [Vega-Lite]([url](https://vega.github.io/vega-lite/)) specification.
 
