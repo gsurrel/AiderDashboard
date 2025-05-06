@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="light dark">
+    <title>Aider dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/vega@5"></script>
+    <script src="https://cdn.jsdelivr.net/npm/vega-lite@5"></script>
+    <script src="https://cdn.jsdelivr.net/npm/vega-embed@6"></script>
+    <style>
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+        }
+
+        .top-bar {
+            display: flex;
+            background-color: Canvas;
+            border-bottom: 3pt ButtonFace double;
+            padding: 10px;
+            position: sticky;
+            top: 0;
+            left: 0;
+            z-index: 10;
+        }
+
+        input {
+            padding: 5px;
+        }
+
+        input[type="range"] {
+            height: 0;
+        }
+
+        .container {
+            flex-grow: 1;
+            display: flex;
+        }
+
+        .vega-bind {
+            display: flex;
+            align-items: center;
+        }
+
+        .vega-bind-name {
+            margin: 0 1ex;
+        }
+
+        .vega-embed>details>summary {
+            background: Canvas;
+            box-shadow: 1px 1px 3px rgba(0, 0, 0, 0.1);
+            color: GrayText;
+            border: 1px solid GrayText;
+        }
+
+        .repo-button {
+            padding: 5px 10px;
+            border: none;
+            cursor: pointer;
+        }
+
+        #visualization {
+            padding: 20px;
+            width: 100%;
+            overflow: scroll;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="top-bar">
+        <div class="vega-bind">
+            <label>
+                <span class="vega-bind-name">Aider Git reference</span><input id="gitRef" type="text" value="main">
+            </label>
+        </div>
+        <div class="container"></div>
+        <button class="repo-button" onclick="location.href='https://github.com/gsurrel/AiderDashboard'">Repo</button>
+    </div>
+
+    <div id="visualization"></div>
+
+    <script>
+        const spec = {
+            "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+            "description": "Aider performance results",
+            "params": [
+                { "name": "dirNameHighlight", "value": "", "bind": { "name": "Highlight (regex)", "input": "text", "element": ".container" } },
+                { "name": "dirNameFilter", "value": "", "bind": { "name": "Dir. name (regex)", "input": "text", "element": ".container" } },
+                { "name": "maxCostFilter", "value": "200", "bind": { "name": "Max cost", "input": "range", "max": 200, "element": ".container" } }
+            ],
+            "transform": [
+                /// Parse the YAML manually
+                { "calculate": "split(datum.data, '- ')", "as": "data" }, // Split per record (gives a single record with an array of length N)
+                { "flatten": ["data"] }, // Create N records from the array
+                { "calculate": "split(datum.data, '\\n  ')", "as": "data" }, // Split each record per line (for the M characteristic of each record)
+                { "filter": "datum.data != ''" }, // Remove empty records
+                { "calculate": "split(datum.data[0], ': ')[1]", "as": "dirname" }, // Extract the dirname (first value), useful for grouping later
+                { "flatten": ["data"], "as": ["data"] }, // Create NxM records, reparating each record's fields
+                { "calculate": "split(datum.data, ': ')[0]", "as": "key" }, // Extract the field name
+                { "calculate": "split(datum.data, ': ')[1]", "as": "value" }, // Extract the field value
+                { "filter": "datum.key != 'dirname'" }, // Remove fields that are the already defined dirname
+                { "calculate": "parseFloat(trim(datum.value))", "as": "valueFloat" }, // Parse floats
+                { "calculate": "isValid(datum.valueFloat) ? datum.valueFloat : datum.value", "as": "value" }, // Replace valid floats with the parsed value
+                { "pivot": "key", "value": "value", "op": "max", "groupby": ["dirname"] }, // Group all records values for a given dirname, shrinking from NxM records to N records.
+                /// End parsing
+                { "filter": "dirNameFilter == '' || test(regexp(dirNameFilter,'gi'), datum.dirname)" },
+                { "filter": "maxCostFilter != '200' ? datum.total_cost <= parseFloat(maxCostFilter) : 1" }
+            ],
+            "data": {
+                // Load YAML as a DSV, using invalid separator to get a single line
+                "url": "https://raw.githubusercontent.com/Aider-AI/aider/main/aider/website/_data/polyglot_leaderboard.yml",
+                "format": { "type": "dsv", "delimiter": {} }, "name": "raw"
+            },
+            "resolve": {
+                "legend": { "color": "independent" },
+                "scale": { "color": "independent" },
+                "axis": { "y": "independent" }
+            },
+            "vconcat": [
+                {
+                    "title": "Performance: pass rate",
+                    "facet": {
+                        "column": {
+                            "field": "edit_format",
+                            "type": "nominal",
+                            "title": "Edit format"
+                        }
+                    },
+                    "resolve": { "axis": { "y": "independent" }, "legend": { "color": "independent" } },
+                    "spec": {
+                        "layer": [
+                            {
+                                "mark": "bar",
+                                "encoding": {
+                                    "y": {
+                                        "field": "dirname",
+                                        "type": "nominal",
+                                        "title": null,
+                                        "sort": "-x"
+                                    },
+                                    "x": {
+                                        "field": "pass_rate_1",
+                                        "type": "quantitative",
+                                        "title": "Pass Rate 1 (▬)",
+                                        "scale": { "domainMax": 100 }
+                                    },
+                                    "color": {
+                                        "field": "total_cost",
+                                        "type": "quantitative",
+                                        "title": "Cost",
+                                        "scale": {
+                                            "scheme": "redyellowgreen",
+                                            "interpolate": "lab",
+                                            "reverse": true,
+                                            "type": "sqrt"
+                                        }
+                                    },
+                                    "tooltip": [
+                                        { "field": "model", "type": "nominal", "title": "Model" },
+                                        {
+                                            "field": "total_cost",
+                                            "type": "quantitative",
+                                            "title": "Cost"
+                                        },
+                                        {
+                                            "field": "pass_rate_1",
+                                            "type": "quantitative",
+                                            "title": "Pass Rate 1"
+                                        },
+                                        {
+                                            "field": "pass_rate_2",
+                                            "type": "quantitative",
+                                            "title": "Pass Rate 2"
+                                        },
+                                        {
+                                            "field": "error_outputs",
+                                            "type": "quantitative",
+                                            "title": "Error Outputs"
+                                        },
+                                        {
+                                            "field": "test_timeouts",
+                                            "type": "quantitative",
+                                            "title": "Test Timeouts"
+                                        }
+                                    ]
+                                }
+                            },
+                            {
+                                "mark": "point",
+                                "encoding": {
+                                    "y": {
+                                        "field": "dirname",
+                                        "type": "nominal",
+                                        "sort": "-x"
+                                    },
+                                    "x": {
+                                        "field": "pass_rate_2",
+                                        "type": "quantitative",
+                                        "title": "Pass Rate 2 (o)"
+                                    },
+                                    "color": { "value": "AccentColor" },
+                                    "shape": { "value": "circle" },
+                                    "size": { "value": 100 },
+                                    "tooltip": [
+                                        { "field": "model", "type": "nominal", "title": "Model" },
+                                        {
+                                            "field": "total_cost",
+                                            "type": "quantitative",
+                                            "title": "Cost"
+                                        },
+                                        {
+                                            "field": "pass_rate_1",
+                                            "type": "quantitative",
+                                            "title": "Pass Rate 1"
+                                        },
+                                        {
+                                            "field": "pass_rate_2",
+                                            "type": "quantitative",
+                                            "title": "Pass Rate 2"
+                                        },
+                                        {
+                                            "field": "error_outputs",
+                                            "type": "quantitative",
+                                            "title": "Error Outputs"
+                                        },
+                                        {
+                                            "field": "test_timeouts",
+                                            "type": "quantitative",
+                                            "title": "Test Timeouts"
+                                        }
+                                    ]
+                                }
+                            }
+                        ]
+                    }
+                },
+                {
+                    "title": "Quality metrics",
+                    "resolve": {
+                        "legend": { "color": "independent" },
+                        "scale": { "color": "independent" }
+                    },
+                    "hconcat": [
+                        {
+                            "mark": "bar",
+                            "encoding": {
+                                "y": {
+                                    "field": "dirname",
+                                    "type": "nominal",
+                                    "title": null,
+                                    "sort": "-x"
+                                },
+                                "x": {
+                                    "field": "percent_cases_well_formed",
+                                    "type": "quantitative",
+                                    "title": "Percent Cases Well Formed (%)"
+                                },
+                                "color": {
+                                    "field": "percent_cases_well_formed",
+                                    "type": "quantitative",
+                                    "title": "Percent Cases Well Formed (%)",
+                                    "scale": { "scheme": "greens" }
+                                },
+                                "tooltip": [
+                                    { "field": "model", "type": "nominal", "title": "Model" },
+                                    {
+                                        "field": "percent_cases_well_formed",
+                                        "type": "quantitative",
+                                        "title": "Percent Cases Well Formed (%)"
+                                    },
+                                    {
+                                        "field": "error_outputs",
+                                        "type": "quantitative",
+                                        "title": "Error Outputs"
+                                    },
+                                    {
+                                        "field": "test_timeouts",
+                                        "type": "quantitative",
+                                        "title": "Test Timeouts"
+                                    }
+                                ]
+                            }
+                        },
+                        {
+                            "mark": "bar",
+                            "encoding": {
+                                "y": {
+                                    "field": "dirname",
+                                    "type": "nominal",
+                                    "title": null,
+                                    "sort": "-x"
+                                },
+                                "x": {
+                                    "field": "num_malformed_responses",
+                                    "type": "quantitative",
+                                    "title": "Number of Malformed Responses"
+                                },
+                                "color": {
+                                    "field": "num_malformed_responses",
+                                    "type": "quantitative",
+                                    "title": "Number of Malformed Responses",
+                                    "scale": { "scheme": "reds" }
+                                },
+                                "tooltip": [
+                                    { "field": "model", "type": "nominal", "title": "Model" },
+                                    {
+                                        "field": "percent_cases_well_formed",
+                                        "type": "quantitative",
+                                        "title": "Percent Cases Well Formed (%)"
+                                    },
+                                    {
+                                        "field": "num_malformed_responses",
+                                        "type": "quantitative",
+                                        "title": "Number of Malformed Responses"
+                                    },
+                                    {
+                                        "field": "error_outputs",
+                                        "type": "quantitative",
+                                        "title": "Error Outputs"
+                                    },
+                                    {
+                                        "field": "test_timeouts",
+                                        "type": "quantitative",
+                                        "title": "Test Timeouts"
+                                    }
+                                ]
+                            }
+                        },
+                        {
+                            "mark": "bar",
+                            "encoding": {
+                                "y": {
+                                    "field": "dirname",
+                                    "type": "nominal",
+                                    "title": null,
+                                    "sort": "-x"
+                                },
+                                "x": {
+                                    "field": "lazy_comments",
+                                    "type": "quantitative",
+                                    "title": "Lazy comments"
+                                },
+                                "color": {
+                                    "field": "lazy_comments",
+                                    "type": "quantitative",
+                                    "title": "Lazy comments",
+                                    "scale": { "scheme": "reds" }
+                                },
+                                "tooltip": [
+                                    { "field": "model", "type": "nominal", "title": "Model" },
+                                    {
+                                        "field": "percent_cases_well_formed",
+                                        "type": "quantitative",
+                                        "title": "Percent Cases Well Formed (%)"
+                                    },
+                                    {
+                                        "field": "num_malformed_responses",
+                                        "type": "quantitative",
+                                        "title": "Number of Malformed Responses"
+                                    },
+                                    {
+                                        "field": "error_outputs",
+                                        "type": "quantitative",
+                                        "title": "Error Outputs"
+                                    },
+                                    {
+                                        "field": "test_timeouts",
+                                        "type": "quantitative",
+                                        "title": "Test Timeouts"
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                }
+            ],
+            "autosize": { "resize": true },
+            "config": {
+                "font": "system-ui",
+                "axisLeft": {
+                    "labelExpr": "split(datum.label, '--')[1]",
+                    "labelFontWeight": { "expr": "dirNameHighlight == '' ? 500 : test(regexp(dirNameHighlight,'gi'), datum.value) ? 1000 : 300" },
+                    "labelFontSize": 12,
+                    "labelLimit": 500
+                },
+                "background": "Canvas",
+                "view": { "stroke": "GrayText", "fill": "Field" },
+                "title": { "color": "CanvasText", "subtitleColor": "CanvasText", "fontSize": 28 },
+                "style": { "guide-label": { "fill": "CanvasText" }, "guide-title": { "fill": "CanvasText" } },
+                "axis": { "domainColor": "CanvasText", "gridColor": "GrayText", "tickColor": "CanvasText" }
+
+            }
+        };
+
+        function loadVisualization(gitRef) {
+            var newSpec = JSON.parse(JSON.stringify(spec));
+            gitRef = (typeof gitRef === "string" && gitRef.trim().length > 0) ? gitRef : "main";
+            newSpec.data.url = `https://raw.githubusercontent.com/Aider-AI/aider/${gitRef}/aider/website/_data/polyglot_leaderboard.yml`;
+            console.log(newSpec);
+            vegaEmbed('#visualization', newSpec, { renderer: "svg" }).catch(console.error);
+        }
+
+        document.getElementById('gitRef').addEventListener('change', (event) => {
+            const gitRef = event.target.value;
+            loadVisualization(gitRef);
+        });
+
+        loadVisualization();
+    </script>
+
+</body>
+
+</html>
